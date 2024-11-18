@@ -4,3 +4,5 @@ node_modules/
 pending-txs.json
 *.log
 .DS_Store
+/punks
+part*

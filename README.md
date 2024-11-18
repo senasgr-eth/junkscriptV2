@@ -1,250 +1,167 @@
 # Junkscriptv2
 
-An enhanced tool for creating inscriptions on the Junkcoin blockchain with core wallet integration, P2SH support, and advanced file handling capabilities.
+A minter and protocol for inscriptions on Junkcoin with improved wallet management.
 
-## Author
-senasgr-eth
+## Setup
 
-## Features
-
-- Automatic core wallet integration
-- Create inscriptions from various file types (JSON, images, etc.)
-- P2SH (Pay to Script Hash) support for enhanced security
-- JNK-20 token standard support
-- Automatic content-type detection
-- Built-in wallet management
-- RPC node integration
-- Enhanced error handling
-
-## Prerequisites
-
-1. Node.js installed
-2. Running Junkcoin node with RPC enabled
-3. Basic understanding of blockchain transactions
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/senasgr-eth/junkscriptv2.git
-cd junkscriptv2
-```
-
-2. Install dependencies:
+**Install dependencies:**
 ```bash
 npm install
 ```
 
-3. Create .env file:
+**Create a `.env` file with your node information:**
 ```env
-NODE_RPC_URL=http://127.0.0.1:9771
-NODE_RPC_USER=your_rpc_user
-NODE_RPC_PASS=your_rpc_password
+NODE_RPC_URL=http://<ip>:<port>
+NODE_RPC_USER=<username>
+NODE_RPC_PASS=<password>
 TESTNET=false
 FEE_PER_KB=100000000
 ```
 
-## Setup
+## Wallet Management
 
-1. Create a new wallet:
+### Create a New Wallet
 ```bash
 node junkscriptv2.js wallet new
 ```
 This will:
-- Create a .wallet.json file with your address
-- Automatically import the private key to your core wallet
-- Label the address as "junkscriptions" in your core wallet
+1. Generate a new private key and address
+2. Create a local wallet file (.wallet.json)
+3. Automatically import the private key to your core wallet
+4. Display the address to fund
 
-2. Fund your wallet:
-- Send JNK to the displayed address
-- Wait for transaction confirmation
+### Import Existing Wallet
+```bash
+node junkscriptv2.js wallet import <private_key>
+```
+This will:
+1. Import your existing private key
+2. Create a local wallet file (.wallet.json)
+3. Automatically import the private key to your core wallet
+4. Display the corresponding address
 
-3. Sync your wallet:
+### Sync Wallet
+After funding your wallet, sync it to see your balance:
 ```bash
 node junkscriptv2.js wallet sync
 ```
 
-## Usage
-
-### Basic Wallet Operations
-
+### Check Balance
 ```bash
-# Check wallet balance
 node junkscriptv2.js wallet balance
+```
 
-# Send JNK to address
-node junkscriptv2.js wallet send <address> <amount>
-
-# Split UTXOs
+### Split UTXOs
+If you plan to mint multiple tokens, split your UTXOs first:
+```bash
 node junkscriptv2.js wallet split <number_of_splits>
 ```
+Example: `node junkscriptv2.js wallet split 10`
 
-### Creating Inscriptions
-
-1. From JSON file:
+### Send Funds
 ```bash
-# Create a JSON file (e.g., inscription.json)
-{
-  "p": "jnk-20",
-  "op": "mint",
-  "tick": "TEST",
-  "amt": "1000"
-}
-
-# Mint the inscription
-node junkscriptv2.js mint <address> inscription.json
+node junkscriptv2.js wallet send <address> <amount>
 ```
 
-2. From image file:
+## Minting
+
+### From File
 ```bash
-# Supported formats: JPG, JPEG, PNG, GIF, WEBP
-node junkscriptv2.js mint <address> image.jpg
+node junkscriptv2.js mint <address> <path>
 ```
 
-3. From hex data:
+### Repeating
 ```bash
-# Direct text/plain inscription
-node junkscriptv2.js mint <address> text/plain 48656C6C6F20576F726C64
+node junkscriptv2.js mint <address> <path> <repeat>
 ```
 
-### JNK-20 Token Operations
-
-1. Deploy new token:
+### Examples
 ```bash
-node junkscriptv2.js jnk-20 deploy <address> <ticker> <max_supply> <mint_limit>
+# Mint an image
+node junkscriptv2.js mint JKmyaddress image.png
 
-# Example:
-node junkscriptv2.js jnk-20 deploy jnk1address TEST 1000000 1000
+# Mint a JSON file 100 times
+node junkscriptv2.js mint JKmyaddress data.json 100
 ```
 
-2. Transfer tokens:
-```bash
-node junkscriptv2.js jnk-20 transfer <address> <ticker> <amount>
+## JNK-20 Operations
 
-# Example:
-node junkscriptv2.js jnk-20 transfer jnk1address TEST 100
+### Deploy Token
+```bash
+node junkscriptv2.js jnk-20 deploy <address> <ticker> <max_supply> <limit_per_mint>
+```
+Example:
+```bash
+node junkscriptv2.js jnk-20 deploy JKmyaddress PUNK 21000000 1000
 ```
 
-## File Support
+### Mint Tokens
+```bash
+node junkscriptv2.js jnk-20 mint <address> <ticker> <amount> [repeat_count]
+```
+Example:
+```bash
+# Mint 100 PUNK tokens
+node junkscriptv2.js jnk-20 mint JKmyaddress PUNK 100
 
-### Supported File Types
+# Mint 100 PUNK tokens 5 times
+node junkscriptv2.js jnk-20 mint JKmyaddress PUNK 100 5
+```
 
-1. JSON Files (.json)
-- Automatically validated
-- Content-type: application/json
-- Used for structured data like JNK-20 tokens
+### Transfer Tokens
+```bash
+node junkscriptv2.js jnk-20 transfer <recipient_address> <ticker> <amount>
+```
 
-2. Image Files
-- JPG/JPEG: image/jpeg
-- PNG: image/png
-- GIF: image/gif
-- WEBP: image/webp
-- Size limit: 24KB
+## Important Notes
 
-3. Other Files
-- Automatic content-type detection
-- Fallback to application/octet-stream
+1. **Fees**: The default fee rate is 1 JNK/KB. You can adjust this in the `.env` file using `FEE_PER_KB`.
 
-### Size Limits
+2. **Output Amounts**: 
+   - Minimum dust amount: 0.001 JNK (100000 satoshis)
+   - Inscription amount: 0.005 JNK (500000 satoshis)
 
-- Maximum file size: 24KB (MAX_CHUNK_LEN * 100)
-- Maximum script element size: 520 bytes
-- Maximum payload length: 1500 bytes
+3. **Best Practices**:
+   - Always sync your wallet before minting
+   - Split UTXOs before bulk minting
+   - Ensure sufficient funds for fees
+   - Wait for transactions to confirm before making new ones
+   - Keep your private keys secure
 
-## Security Features
+4. **File Support**:
+   - Images: JPG, JPEG, PNG, GIF, WEBP
+   - JSON files
+   - Other file types supported with automatic content type detection
 
-1. P2SH Implementation
-- Enhanced security for inscriptions
-- Script validation
-- Proper signature verification
+## Troubleshooting
 
-2. Error Handling
-- JSON validation
-- File size validation
-- RPC connection validation
-- Transaction validation
-- Core wallet integration validation
+### Common Issues
 
-## Core Wallet Integration
+1. **"not enough funds"**
+   - Solution: Fund your wallet and run `wallet sync`
 
-The tool automatically integrates with your Junkcoin core wallet:
+2. **"too-long-mempool-chain"**
+   - Solution: Wait for previous transactions to confirm
 
-1. When creating a new wallet:
-- Private key is automatically imported to core wallet
-- Address is labeled as "junkscriptions"
-- Maintains synchronization between local and core wallet
+3. **"bad-txns-inputs-spent"**
+   - Solution: Transaction already sent, no action needed
 
-2. Configuration:
-- Ensure core wallet is running
-- RPC must be enabled in junkcoin.conf:
-  ```
-  server=1
-  rpcuser=your_rpc_user
-  rpcpassword=your_rpc_password
-  ```
-- Update .env with matching RPC credentials
+4. **"file too large"**
+   - Solution: Ensure file is under 24KB
+
+5. **Connection Issues**
+   - Verify RPC credentials in `.env`
+   - Check if Junkcoin node is running
+   - Ensure correct RPC port configuration
+
+### Recovery
+
+If minting is interrupted, the script creates `pending-txs.json`. Simply run the same command again to continue from where it left off.
 
 ## Server Mode
 
-Run an inscription server to view inscriptions:
+Start a local server to view inscriptions:
 ```bash
 node junkscriptv2.js server
-
-# Access inscriptions at:
-http://localhost:3000/tx/<inscription_txid>
 ```
-
-## Error Messages and Troubleshooting
-
-1. "Not enough funds"
-- Fund your wallet address
-- Run wallet sync
-- Check balance
-
-2. "Invalid JSON file"
-- Verify JSON syntax
-- Check file encoding (UTF-8)
-
-3. "File too large"
-- Reduce file size to under 24KB
-- Consider compression
-
-4. RPC Connection Issues
-- Verify Junkcoin node is running
-- Check RPC credentials in .env
-- Ensure RPC is enabled in junkcoin.conf
-
-5. Core Wallet Import Issues
-- Ensure core wallet is running
-- Verify RPC credentials
-- Check core wallet error logs
-
-## Best Practices
-
-1. Before Minting
-- Always sync wallet first
-- Ensure sufficient funds
-- Verify file contents and size
-
-2. Transaction Management
-- Monitor pending transactions
-- Keep track of inscription TXIDs
-- Regular wallet syncs
-
-3. Security
-- Backup .wallet.json file
-- Keep RPC credentials secure
-- Use testnet for testing
-- Backup core wallet regularly
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+Access inscriptions at: `http://localhost:3000/tx/<txid>`

@@ -31,7 +31,8 @@ const WALLET_PATH = process.env.WALLET || '.wallet.json'
 const MAX_SCRIPT_ELEMENT_SIZE = 520
 const MAX_CHUNK_LEN = 240
 const MAX_PAYLOAD_LEN = 1500
-
+const DUST_AMOUNT = 100000 // 0.001 JNK minimum for dust threshold
+const INSCRIPTION_AMOUNT = 500000 // 0.005 JNK for inscription outputs
 async function main() {
     let cmd = process.argv[2]
 
@@ -50,9 +51,44 @@ async function main() {
         await server()
     } else if (cmd == 'jnk-20') {
         await doge20()
+    } else if (cmd == 'help') {
+        showHelp()
     } else {
+        showHelp()
         throw new Error(`unknown command: ${cmd}`)
     }
+}
+
+function showHelp() {
+    console.log(`
+Junkscriptions CLI Commands:
+
+Wallet Management:
+  wallet new                     Create a new wallet
+  wallet import <private_key>    Import existing wallet from private key
+  wallet sync                    Sync wallet with blockchain
+  wallet balance                Show wallet balance
+  wallet send <addr> <amount>    Send JKC to address
+  wallet split <count>           Split UTXOs for efficient minting
+
+Minting:
+  mint <address> <file>          Mint inscription from file
+  mint <address> <file> <repeat> Mint multiple times
+
+JNK-20 Tokens:
+  jnk-20 deploy <addr> <tick> <max> <lim>    Deploy new token
+  jnk-20 mint <addr> <tick> <amt> [repeat]   Mint tokens
+  jnk-20 transfer <addr> <tick> <amt>        Transfer tokens
+
+Server:
+  server                         Start inscription viewer server
+
+Examples:
+  node junkscriptv2.js wallet new
+  node junkscriptv2.js wallet import KxWjJGFZweBxp5QU9cZ7dJ7fMKyJxqsqXWtPri3HyNhyxvWCiw6M
+  node junkscriptv2.js mint JKmyaddress image.png
+  node junkscriptv2.js jnk-20 deploy JKmyaddress PUNK 21000000 1000
+    `)
 }
 
 async function doge20() {
@@ -111,12 +147,13 @@ async function doge20Transfer() {
         await mint(argAddress, "text/plain;charset=utf-8", encodedDoge20Tx);
     }
 }
-
 async function wallet() {
     let subcmd = process.argv[3]
 
     if (subcmd == 'new') {
         await walletNew()
+    } else if (subcmd == 'import') {
+        await walletImport()
     } else if (subcmd == 'sync') {
         await walletSync()
     } else if (subcmd == 'balance') {
@@ -157,6 +194,71 @@ async function walletNew() {
             await axios.post(process.env.NODE_RPC_URL, body, options)
             console.log('Created new wallet and imported to core wallet')
             console.log('Address:', address)
+            console.log('Private Key:', privkey)
+            console.log('\nIMPORTANT: Save your private key securely!')
+            console.log('\nBefore minting, you need to:')
+            console.log('1. Fund this address with JKC')
+            console.log('2. Run: node junkscriptions.js wallet sync')
+        } catch (error) {
+            console.error('Error importing to core wallet:', error.message)
+            if (error.response && error.response.data) {
+                console.error('RPC Error:', error.response.data.error)
+            }
+            // Still create local wallet even if core wallet import fails
+            console.log('\nLocal wallet created but core wallet import failed')
+            console.log('Address:', address)
+            console.log('Private Key:', privkey)
+            console.log('\nIMPORTANT: Save your private key securely!')
+            console.log('\nBefore minting, you need to:')
+            console.log('1. Fund this address with JKC')
+            console.log('2. Run: node junkscriptions.js wallet sync')
+        }
+    } else {
+        throw new Error('wallet already exists')
+    }
+}
+
+async function walletImport() {
+    const argPrivKey = process.argv[4]
+    
+    if (!argPrivKey) {
+        throw new Error('Private key is required. Usage: wallet import <private_key>')
+    }
+
+    try {
+        // Validate and convert private key
+        const privateKey = new PrivateKey(argPrivKey)
+        const privkey = privateKey.toWIF()
+        const address = privateKey.toAddress().toString()
+
+        // Check if wallet already exists
+        if (fs.existsSync(WALLET_PATH)) {
+            throw new Error('Wallet already exists. Delete .wallet.json first if you want to import a new key')
+        }
+
+        // Create wallet file
+        const json = { privkey, address, utxos: [] }
+        fs.writeFileSync(WALLET_PATH, JSON.stringify(json, 0, 2))
+        
+        // Import to core wallet
+        try {
+            const body = {
+                jsonrpc: "1.0",
+                id: "importprivkey",
+                method: "importprivkey",
+                params: [privkey, "junkscriptions", false]
+            }
+
+            const options = {
+                auth: {
+                    username: process.env.NODE_RPC_USER,
+                    password: process.env.NODE_RPC_PASS
+                }
+            }
+
+            await axios.post(process.env.NODE_RPC_URL, body, options)
+            console.log('Successfully imported wallet to core wallet')
+            console.log('Address:', address)
             console.log('\nIMPORTANT: Before minting, you need to:')
             console.log('1. Fund this address with JKC')
             console.log('2. Run: node junkscriptions.js wallet sync')
@@ -172,8 +274,12 @@ async function walletNew() {
             console.log('1. Fund this address with JKC')
             console.log('2. Run: node junkscriptions.js wallet sync')
         }
-    } else {
-        throw new Error('wallet already exists')
+    } catch (error) {
+        console.error('Error importing wallet:', error.message)
+        if (error.message.includes('Invalid checksum')) {
+            console.error('\nInvalid private key format. Make sure you are using a valid WIF private key')
+        }
+        process.exit(1)
     }
 }
 
@@ -205,13 +311,13 @@ async function walletSync() {
                 txid: utxo.txid,
                 vout: utxo.vout,
                 script: utxo.scriptPubKey,
-                satoshis: utxo.amount * 1e8
+                satoshis: Math.floor(utxo.amount * 1e8) // Convert from JNK to satoshis, ensure integer
             }
         })
 
         fs.writeFileSync(WALLET_PATH, JSON.stringify(wallet, 0, 2))
         let balance = wallet.utxos.reduce((acc, curr) => acc + curr.satoshis, 0)
-        console.log('Balance:', balance/1e8, 'JNK')
+        console.log('Balance:', balance/1e8, 'JKC')
         
         if (balance === 0) {
             console.log('\nNo funds found. Before minting, you need to:')
@@ -237,7 +343,7 @@ function walletBalance() {
         let wallet = JSON.parse(fs.readFileSync(WALLET_PATH))
         let balance = wallet.utxos.reduce((acc, curr) => acc + curr.satoshis, 0)
         console.log('Address:', wallet.address)
-        console.log('Balance:', balance/1e8, 'JNK')
+        console.log('Balance:', balance/1e8, 'JKC')
         
         if (balance === 0) {
             console.log('\nNo funds found. Before minting, you need to:')
@@ -304,8 +410,12 @@ async function walletSplit() {
 
         let tx = new Transaction()
         tx.from(wallet.utxos)
+        
+        // Calculate split amount ensuring each output is above dust threshold
+        const splitAmount = Math.max(Math.floor(balance / splits), DUST_AMOUNT)
+        
         for (let i = 0; i < splits - 1; i++) {
-            tx.to(wallet.address, Math.floor(balance / splits))
+            tx.to(wallet.address, splitAmount)
         }
         tx.change(wallet.address)
         tx.sign(wallet.privkey)
@@ -317,7 +427,6 @@ async function walletSplit() {
         process.exit(1)
     }
 }
-
 async function mint(paramAddress, paramContentTypeOrFilename, paramHexData) {
     const argAddress = paramAddress || process.argv[3]
     const argContentTypeOrFilename = paramContentTypeOrFilename || process.argv[4]
@@ -435,7 +544,6 @@ function numberToChunk(n) {
 function opcodeToChunk(op) {
     return { opcodenum: op }
 }
-
 function inscribe(wallet, address, contentType, data) {
     let txs = []
     let privateKey = new PrivateKey(wallet.privkey)
@@ -478,21 +586,25 @@ function inscribe(wallet, address, contentType, data) {
             inscription.chunks.unshift(partial.chunks.pop())
         }
 
-        // Build P2SH redeem script
-        let redeemScript = new Script()
-        redeemScript.chunks.push(bufferToChunk(publicKey.toBuffer()))
-        redeemScript.chunks.push(opcodeToChunk(Opcode.OP_CHECKSIGVERIFY))
+        let lock = new Script()
+        lock.chunks.push(bufferToChunk(publicKey.toBuffer()))
+        lock.chunks.push(opcodeToChunk(Opcode.OP_CHECKSIGVERIFY))
         partial.chunks.forEach(() => {
-            redeemScript.chunks.push(opcodeToChunk(Opcode.OP_DROP))
+            lock.chunks.push(opcodeToChunk(Opcode.OP_DROP))
         })
-        redeemScript.chunks.push(opcodeToChunk(Opcode.OP_TRUE))
+        lock.chunks.push(opcodeToChunk(Opcode.OP_TRUE))
 
-        // Create P2SH script
-        let p2shScript = Script.buildScriptHashOut(redeemScript)
-        
+        let lockhash = Hash.ripemd160(Hash.sha256(lock.toBuffer()))
+
+        let p2sh = new Script()
+        p2sh.chunks.push(opcodeToChunk(Opcode.OP_HASH160))
+        p2sh.chunks.push(bufferToChunk(lockhash))
+        p2sh.chunks.push(opcodeToChunk(Opcode.OP_EQUAL))
+
+        // Use INSCRIPTION_AMOUNT for P2SH outputs
         let p2shOutput = new Transaction.Output({
-            script: p2shScript,
-            satoshis: 1000000
+            script: p2sh,
+            satoshis: INSCRIPTION_AMOUNT
         })
 
         let tx = new Transaction()
@@ -504,14 +616,10 @@ function inscribe(wallet, address, contentType, data) {
             let signature = Transaction.sighash.sign(tx, privateKey, Signature.SIGHASH_ALL, 0, lastLock)
             let txsignature = Buffer.concat([signature.toBuffer(), Buffer.from([Signature.SIGHASH_ALL])])
 
-            // Create P2SH unlock script
-            let unlock = Script.buildP2SHMultisigIn(
-                [publicKey], 
-                1, 
-                [txsignature], 
-                {cachedMultisig: lastLock}
-            )
+            let unlock = new Script()
             unlock.chunks = unlock.chunks.concat(lastPartial.chunks)
+            unlock.chunks.push(bufferToChunk(txsignature))
+            unlock.chunks.push(bufferToChunk(lastLock.toBuffer()))
             tx.inputs[0].setScript(unlock)
         }
 
@@ -528,19 +636,18 @@ function inscribe(wallet, address, contentType, data) {
         p2shInput.clearSignatures = () => {}
         p2shInput.getSignatures = () => {}
 
-        lastLock = redeemScript
+        lastLock = lock
         lastPartial = partial
     }
 
-    // Final transaction to recipient address
     let tx = new Transaction()
     tx.addInput(p2shInput)
     
-    // Check if recipient address is P2SH
+    // Use INSCRIPTION_AMOUNT for final recipient output
     if (address.isPayToScriptHash()) {
-        tx.addOutput(Script.buildScriptHashOut(address), 1000000)
+        tx.addOutput(Script.buildScriptHashOut(address), INSCRIPTION_AMOUNT)
     } else {
-        tx.to(address, 1000000)
+        tx.to(address, INSCRIPTION_AMOUNT)
     }
     
     fund(wallet, tx)
@@ -548,14 +655,10 @@ function inscribe(wallet, address, contentType, data) {
     let signature = Transaction.sighash.sign(tx, privateKey, Signature.SIGHASH_ALL, 0, lastLock)
     let txsignature = Buffer.concat([signature.toBuffer(), Buffer.from([Signature.SIGHASH_ALL])])
 
-    // Create final P2SH unlock script
-    let unlock = Script.buildP2SHMultisigIn(
-        [publicKey],
-        1,
-        [txsignature],
-        {cachedMultisig: lastLock}
-    )
+    let unlock = new Script()
     unlock.chunks = unlock.chunks.concat(lastPartial.chunks)
+    unlock.chunks.push(bufferToChunk(txsignature))
+    unlock.chunks.push(bufferToChunk(lastLock.toBuffer()))
     tx.inputs[0].setScript(unlock)
 
     updateWallet(wallet, tx)
@@ -565,22 +668,39 @@ function inscribe(wallet, address, contentType, data) {
 }
 
 function fund(wallet, tx) {
+    // Calculate minimum required amount including fees
+    const minRequired = tx.outputs.reduce((sum, output) => sum + output.satoshis, 0)
+    const estimatedFee = Math.ceil(tx.toBuffer().length * Transaction.FEE_PER_KB / 1000)
+    const totalRequired = minRequired + estimatedFee
+
     tx.change(wallet.address)
     delete tx._fee
 
-    for (const utxo of wallet.utxos) {
-        if (tx.inputs.length && tx.outputs.length && tx.inputAmount >= tx.outputAmount + tx.getFee()) {
-            break
-        }
+    // Sort UTXOs by size to minimize the number of inputs needed
+    const sortedUtxos = [...wallet.utxos].sort((a, b) => b.satoshis - a.satoshis)
+
+    let inputAmount = 0
+    for (const utxo of sortedUtxos) {
+        if (inputAmount >= totalRequired) break
 
         delete tx._fee
         tx.from(utxo)
         tx.change(wallet.address)
         tx.sign(wallet.privkey)
+
+        inputAmount += utxo.satoshis
     }
 
-    if (tx.inputAmount < tx.outputAmount + tx.getFee()) {
+    if (inputAmount < totalRequired) {
         throw new Error('Not enough funds. Please fund the wallet and run: node junkscriptions.js wallet sync')
+    }
+
+    // Ensure change output is above dust threshold
+    const change = inputAmount - minRequired - tx.getFee()
+    if (change > 0 && change < DUST_AMOUNT) {
+        // If change is below dust, increase fee to consume it
+        delete tx._fee
+        tx.fee(tx.getFee() + change)
     }
 }
 
@@ -672,6 +792,13 @@ async function broadcastAll(txs, retry) {
         console.log('Inscription TXID:', txs[1].hash)
     }
 }
+function chunkToNumber(chunk) {
+    if (chunk.opcodenum == 0) return 0
+    if (chunk.opcodenum == 1) return chunk.buf[0]
+    if (chunk.opcodenum == 2) return chunk.buf[1] * 255 + chunk.buf[0]
+    if (chunk.opcodenum > 80 && chunk.opcodenum <= 96) return chunk.opcodenum - 80
+    return undefined
+}
 
 async function extract(txid) {
     const body = {
@@ -728,14 +855,6 @@ async function extract(txid) {
         contentType,
         data
     }
-}
-
-function chunkToNumber(chunk) {
-    if (chunk.opcodenum == 0) return 0
-    if (chunk.opcodenum == 1) return chunk.buf[0]
-    if (chunk.opcodenum == 2) return chunk.buf[1] * 255 + chunk.buf[0]
-    if (chunk.opcodenum > 80 && chunk.opcodenum <= 96) return chunk.opcodenum - 80
-    return undefined
 }
 
 function server() {
